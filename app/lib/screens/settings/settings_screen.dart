@@ -70,7 +70,9 @@ class SettingsScreen extends StatelessWidget {
       destructive: false,
     );
     if (!confirmed) return;
+    // ignore: use_build_context_synchronously
     context.read<FamilyProvider>().reset();
+    // ignore: use_build_context_synchronously
     await context.read<AuthProvider>().signOut();
   }
 

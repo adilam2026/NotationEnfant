@@ -81,6 +81,7 @@ class _AddEditRewardScreenState extends State<AddEditRewardScreen> {
     if (!confirmed) return;
     setState(() => _saving = true);
     try {
+      // ignore: use_build_context_synchronously
       await context.read<FamilyProvider>().deleteReward(widget.existing!.id);
       if (mounted) Navigator.of(context).pop();
     } finally {

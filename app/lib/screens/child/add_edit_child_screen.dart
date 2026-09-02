@@ -78,6 +78,7 @@ class _AddEditChildScreenState extends State<AddEditChildScreen> {
     if (!confirmed) return;
     setState(() => _saving = true);
     try {
+      // ignore: use_build_context_synchronously
       await context.read<FamilyProvider>().deleteChild(widget.existing!.id);
       if (mounted) Navigator.of(context).pop();
     } catch (error) {
