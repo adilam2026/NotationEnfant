@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_colors.dart';
+import 'email_confirmation_screen.dart';
 import 'login_screen.dart';
 
 class WelcomeScreen extends StatefulWidget {
@@ -29,14 +30,30 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
 
   Future<void> _submit(AuthProvider auth) async {
     if (!_formKey.currentState!.validate()) return;
-    final ok = await auth.createFamily(
+    final email = _emailCtrl.text.trim();
+    final outcome = await auth.createFamily(
       familyName: _familyNameCtrl.text.trim(),
-      email: _emailCtrl.text.trim(),
+      email: email,
       password: _passwordCtrl.text,
     );
-    if (!ok && mounted && auth.errorMessage != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(auth.errorMessage!)));
+    if (!mounted) return;
+    switch (outcome) {
+      case SignUpOutcome.signedIn:
+        // AuthGate reacts to the new session and swaps screens on its own.
+        break;
+      case SignUpOutcome.needsConfirmation:
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => EmailConfirmationScreen(email: email),
+          ),
+        );
+        break;
+      case SignUpOutcome.failed:
+        if (auth.errorMessage != null) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(auth.errorMessage!)));
+        }
+        break;
     }
   }
 

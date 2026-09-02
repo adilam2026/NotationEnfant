@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_colors.dart';
+import 'email_confirmation_screen.dart';
 import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -27,11 +28,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _submit(AuthProvider auth) async {
     if (!_formKey.currentState!.validate()) return;
-    final ok = await auth.signIn(
-      email: _emailCtrl.text.trim(),
-      password: _passwordCtrl.text,
-    );
-    if (!ok && mounted && auth.errorMessage != null) {
+    final email = _emailCtrl.text.trim();
+    final ok = await auth.signIn(email: email, password: _passwordCtrl.text);
+    if (!mounted) return;
+    if (ok) {
+      // LoginScreen is reached by pushing on top of WelcomeScreen — pop back
+      // to the root route so AuthGate's now-signed-in state (RootShell)
+      // becomes visible instead of staying stuck on this pushed screen.
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      return;
+    }
+    if (auth.lastSignInNeedsConfirmation) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => EmailConfirmationScreen(email: email)),
+      );
+      return;
+    }
+    if (auth.errorMessage != null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(auth.errorMessage!)));
     }

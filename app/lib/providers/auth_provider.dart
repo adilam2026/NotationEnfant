@@ -2,9 +2,15 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/family_profile.dart';
+import '../navigation.dart';
 import '../services/supabase_service.dart';
 
 enum AuthStatus { unknown, signedOut, signedIn }
+
+/// Outcome of [AuthProvider.createFamily]. `needsConfirmation` is a normal,
+/// expected result whenever the Supabase project requires email
+/// confirmation (session is null right after signUp) — it is NOT an error.
+enum SignUpOutcome { signedIn, needsConfirmation, failed }
 
 class AuthProvider extends ChangeNotifier {
   final _service = SupabaseService.instance;
@@ -13,6 +19,11 @@ class AuthProvider extends ChangeNotifier {
   FamilyProfile? profile;
   String? errorMessage;
   bool isBusy = false;
+
+  /// Set alongside [errorMessage] when the last failed [signIn] call failed
+  /// specifically because the account's email isn't confirmed yet, so the
+  /// UI can offer "resend the confirmation email" instead of a dead end.
+  bool lastSignInNeedsConfirmation = false;
 
   AuthProvider() {
     status = _service.currentUser == null
@@ -31,6 +42,12 @@ class AuthProvider extends ChangeNotifier {
       status = newStatus;
       if (signedIn) {
         _loadProfile();
+        // Covers returning from the Supabase confirmation-email deep link:
+        // the app resumes with LoginScreen/EmailConfirmationScreen still
+        // pushed on top of the (now stale) signed-out root route, and
+        // nothing local is around to pop it — do it here instead so the
+        // now-signed-in RootShell actually becomes visible.
+        rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
       } else {
         profile = null;
       }
@@ -40,6 +57,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _loadProfile() async {
     try {
+      // Creates the `profiles` row on first call for this account if it's
+      // missing — the normal case right after a fresh email confirmation,
+      // since signUpFamily couldn't create it earlier (no session yet).
+      await _service.ensureProfileForCurrentUser();
       profile = await _service.fetchProfile();
       notifyListeners();
     } catch (_) {
@@ -48,23 +69,57 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> createFamily({
+  Future<SignUpOutcome> createFamily({
     required String familyName,
     required String email,
     required String password,
   }) async {
-    return _run(() async {
-      await _service.signUpFamily(
+    isBusy = true;
+    errorMessage = null;
+    notifyListeners();
+    try {
+      final signedInImmediately = await _service.signUpFamily(
         email: email,
         password: password,
         familyName: familyName,
       );
-      await _loadProfile();
-    });
+      if (signedInImmediately) {
+        await _loadProfile();
+      }
+      isBusy = false;
+      notifyListeners();
+      return signedInImmediately
+          ? SignUpOutcome.signedIn
+          : SignUpOutcome.needsConfirmation;
+    } catch (error) {
+      isBusy = false;
+      errorMessage = error.toString();
+      notifyListeners();
+      return SignUpOutcome.failed;
+    }
   }
 
-  Future<bool> signIn({required String email, required String password}) {
-    return _run(() => _service.signIn(email: email, password: password));
+  Future<bool> signIn({required String email, required String password}) async {
+    lastSignInNeedsConfirmation = false;
+    isBusy = true;
+    errorMessage = null;
+    notifyListeners();
+    try {
+      await _service.signIn(email: email, password: password);
+      isBusy = false;
+      notifyListeners();
+      return true;
+    } catch (error) {
+      isBusy = false;
+      errorMessage = error.toString();
+      lastSignInNeedsConfirmation = isEmailNotConfirmedError(error);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> resendConfirmationEmail(String email) {
+    return _run(() => _service.resendConfirmationEmail(email));
   }
 
   Future<bool> sendPasswordReset(String email) {

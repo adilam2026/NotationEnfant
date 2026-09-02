@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'navigation.dart';
 import 'providers/auth_provider.dart';
 import 'providers/child_mode_provider.dart';
 import 'providers/family_provider.dart';
@@ -36,6 +37,7 @@ class MesEtoilesApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Mes Étoiles',
         debugShowCheckedModeBanner: false,
+        navigatorKey: rootNavigatorKey,
         theme: AppTheme.light(),
         home: const AuthGate(),
       ),

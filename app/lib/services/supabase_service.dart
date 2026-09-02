@@ -4,17 +4,14 @@ import '../models/child.dart';
 import '../models/family_profile.dart';
 import '../models/reward.dart';
 import '../models/star_event.dart';
+import '../utils/auth_redirect.dart';
+import 'error_mapping.dart';
+
+export 'error_mapping.dart' show AppException, isEmailNotConfirmedError;
 
 /// Thin wrapper around the Supabase client. Screens/providers never touch
 /// `Supabase.instance` directly — everything goes through here so error
 /// handling and mapping stay in one place.
-class AppException implements Exception {
-  final String message;
-  AppException(this.message);
-  @override
-  String toString() => message;
-}
-
 class SupabaseService {
   SupabaseService._();
   static final SupabaseService instance = SupabaseService._();
@@ -24,42 +21,13 @@ class SupabaseService {
   User? get currentUser => _db.auth.currentUser;
   Stream<AuthState> get authStateChanges => _db.auth.onAuthStateChange;
 
-  AppException _mapError(Object error) {
-    if (error is AuthException) {
-      final msg = error.message.toLowerCase();
-      if (msg.contains('invalid login credentials')) {
-        return AppException('Email ou mot de passe incorrect.');
-      }
-      if (msg.contains('already registered') ||
-          msg.contains('user already registered')) {
-        return AppException('Un compte existe déjà avec cet email.');
-      }
-      if (msg.contains('password') && msg.contains('least')) {
-        return AppException('Le mot de passe doit contenir au moins 6 caractères.');
-      }
-      return AppException('Impossible de vous connecter pour le moment.');
-    }
-    if (error is PostgrestException) {
-      switch (error.message) {
-        case 'insufficient_stars':
-          return AppException('Pas encore assez d\'étoiles pour cette récompense.');
-        case 'reward_not_found':
-          return AppException('Cette récompense n\'est plus disponible.');
-        case 'not_authorized':
-          return AppException('Action non autorisée.');
-      }
-      return AppException('Impossible de synchroniser pour le moment.');
-    }
-    return AppException('Une erreur est survenue. Réessayez.');
-  }
-
   Future<T> _guard<T>(Future<T> Function() action) async {
     try {
       return await action();
     } on AppException {
       rethrow;
     } catch (error) {
-      throw _mapError(error);
+      throw mapSupabaseError(error);
     }
   }
 
@@ -67,22 +35,36 @@ class SupabaseService {
   // Auth
   // ---------------------------------------------------------------------
 
-  Future<void> signUpFamily({
+  /// Creates the auth user and stores the family name as user metadata
+  /// (read back later by [ensureProfileForCurrentUser]).
+  ///
+  /// Returns `true` if a session was created immediately (this Supabase
+  /// project doesn't require email confirmation), `false` if the account
+  /// needs email confirmation before it can sign in — in that case there is
+  /// no session yet, so `auth.uid()` is null and we must NOT try to insert
+  /// the `profiles` row now: the RLS policy (`id = auth.uid()`) would
+  /// reject it. The profile is created lazily on first authenticated
+  /// session instead — see [ensureProfileForCurrentUser].
+  Future<bool> signUpFamily({
     required String email,
     required String password,
     required String familyName,
   }) {
     return _guard(() async {
-      final res = await _db.auth.signUp(email: email, password: password);
-      final user = res.user;
-      if (user == null) {
+      final res = await _db.auth.signUp(
+        email: email,
+        password: password,
+        data: {'family_name': familyName},
+        emailRedirectTo: kAuthRedirectUrl,
+      );
+      if (res.user == null) {
         throw AppException('Impossible de créer votre espace pour le moment.');
       }
-      await _db.from('profiles').insert({
-        'id': user.id,
-        'email': email,
-        'family_name': familyName,
-      });
+      if (res.session != null) {
+        await ensureProfileForCurrentUser(familyName: familyName);
+        return true;
+      }
+      return false;
     });
   }
 
@@ -97,7 +79,42 @@ class SupabaseService {
   }
 
   Future<void> sendPasswordReset(String email) {
-    return _guard(() => _db.auth.resetPasswordForEmail(email));
+    return _guard(
+      () => _db.auth.resetPasswordForEmail(email, redirectTo: kAuthRedirectUrl),
+    );
+  }
+
+  Future<void> resendConfirmationEmail(String email) {
+    return _guard(
+      () => _db.auth.resend(
+        type: OtpType.signup,
+        email: email,
+        emailRedirectTo: kAuthRedirectUrl,
+      ),
+    );
+  }
+
+  /// Creates the `profiles` row for the current session if it doesn't
+  /// exist yet. Safe to call on every authenticated app start / sign-in —
+  /// this is what actually finishes onboarding for an account that
+  /// confirmed its email after the app already showed "check your email"
+  /// (session was null back then, so signUpFamily above never inserted the
+  /// row), and is a no-op for every session after the first.
+  Future<void> ensureProfileForCurrentUser({String? familyName}) {
+    return _guard(() async {
+      final user = currentUser;
+      if (user == null) return;
+      final existing =
+          await _db.from('profiles').select('id').eq('id', user.id).maybeSingle();
+      if (existing != null) return;
+      await _db.from('profiles').insert({
+        'id': user.id,
+        'email': user.email ?? '',
+        'family_name': familyName ??
+            (user.userMetadata?['family_name'] as String?) ??
+            'Ma famille',
+      });
+    });
   }
 
   // ---------------------------------------------------------------------
