@@ -4,10 +4,9 @@ import '../models/child.dart';
 import '../models/family_profile.dart';
 import '../models/reward.dart';
 import '../models/star_event.dart';
-import '../utils/auth_redirect.dart';
 import 'error_mapping.dart';
 
-export 'error_mapping.dart' show AppException, isEmailNotConfirmedError;
+export 'error_mapping.dart' show AppException;
 
 /// Thin wrapper around the Supabase client. Screens/providers never touch
 /// `Supabase.instance` directly — everything goes through here so error
@@ -35,42 +34,30 @@ class SupabaseService {
   // Auth
   // ---------------------------------------------------------------------
 
-  /// Creates the auth user and stores the family name as user metadata
-  /// (read back later by [ensureProfileForCurrentUser]).
-  ///
-  /// Returns `true` if a session was created immediately (this Supabase
-  /// project doesn't require email confirmation), `false` if the account
-  /// needs email confirmation before it can sign in — in that case there is
-  /// no session yet, so `auth.uid()` is null and we must NOT try to insert
-  /// the `profiles` row now: the RLS policy (`id = auth.uid()`) would
-  /// reject it. The profile is created lazily on first authenticated
-  /// session instead — see [ensureProfileForCurrentUser].
-  Future<bool> signUpFamily({
-    required String email,
-    required String password,
-    required String familyName,
-  }) {
-    return _guard(() async {
-      final res = await _db.auth.signUp(
-        email: email,
-        password: password,
-        data: {'family_name': familyName},
-        emailRedirectTo: kAuthRedirectUrl,
-      );
-      if (res.user == null) {
-        throw AppException('Impossible de créer votre espace pour le moment.');
-      }
-      if (res.session != null) {
-        await ensureProfileForCurrentUser(familyName: familyName);
-        return true;
-      }
-      return false;
-    });
+  /// Sends a 6-digit email OTP code. Used uniformly for both a brand-new
+  /// address and an existing account — `shouldCreateUser` defaults to
+  /// `true` in supabase_flutter, so Supabase silently creates the account
+  /// on first use instead of requiring a separate sign-up step. There is
+  /// deliberately no password anywhere in this flow.
+  Future<void> sendOtp(String email) {
+    return _guard(() => _db.auth.signInWithOtp(email: email));
   }
 
-  Future<void> signIn({required String email, required String password}) {
+  /// Verifies the 6-digit code and establishes the session.
+  ///
+  /// Type choice: [OtpType.email] is used for both a brand-new account
+  /// (auto-created by [sendOtp] above) and an existing one — there is no
+  /// `OtpType.signup` retry/fallback here. This was verified directly
+  /// against the exact gotrue package version this app is pinned to
+  /// (gotrue 2.27.2): its own bundled test suite
+  /// (test/otp_mock_test.dart, "verifyOTP() with email") verifies a
+  /// `signInWithOtp(email:...)` code with `type: OtpType.email`
+  /// unconditionally, with no branching on whether the account pre-existed.
+  /// `OtpType.signup` is for the legacy email+password confirmation flow
+  /// this app no longer uses.
+  Future<void> verifyOtp({required String email, required String token}) {
     return _guard(() async {
-      await _db.auth.signInWithPassword(email: email, password: password);
+      await _db.auth.verifyOTP(email: email, token: token, type: OtpType.email);
     });
   }
 
@@ -78,28 +65,10 @@ class SupabaseService {
     return _guard(() => _db.auth.signOut());
   }
 
-  Future<void> sendPasswordReset(String email) {
-    return _guard(
-      () => _db.auth.resetPasswordForEmail(email, redirectTo: kAuthRedirectUrl),
-    );
-  }
-
-  Future<void> resendConfirmationEmail(String email) {
-    return _guard(
-      () => _db.auth.resend(
-        type: OtpType.signup,
-        email: email,
-        emailRedirectTo: kAuthRedirectUrl,
-      ),
-    );
-  }
-
   /// Creates the `profiles` row for the current session if it doesn't
   /// exist yet. Safe to call on every authenticated app start / sign-in —
-  /// this is what actually finishes onboarding for an account that
-  /// confirmed its email after the app already showed "check your email"
-  /// (session was null back then, so signUpFamily above never inserted the
-  /// row), and is a no-op for every session after the first.
+  /// this is what finishes onboarding right after the very first OTP
+  /// verification for a brand-new account, and is a no-op afterwards.
   Future<void> ensureProfileForCurrentUser({String? familyName}) {
     return _guard(() async {
       final user = currentUser;

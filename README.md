@@ -38,6 +38,9 @@ supabase/
 4. Dans **Authentication → Providers**, l'authentification Email est activée
    par défaut — c'est la seule utilisée par l'application (pas de compte
    enfant, pas de rôles).
+5. Suivez **`supabase/README_AUTH.md`** pour configurer le template email
+   du code OTP à 6 chiffres — sans ça, l'email envoyé contiendra un lien
+   au lieu d'un code.
 
 La sécurité est assurée par des policies RLS : chaque famille (un compte =
 une ligne `profiles`) ne peut lire/écrire que ses propres enfants,
@@ -112,8 +115,9 @@ vraie clé de signature de release.
 
 ## Ce qui a été livré (V1)
 
-- Authentification email/mot de passe (création d'espace famille, connexion,
-  déconnexion, mot de passe oublié) — pas de compte enfant.
+- Authentification email + code OTP à 6 chiffres, sans mot de passe ni lien
+  à cliquer (voir `supabase/README_AUTH.md` pour la configuration du
+  template email côté Dashboard) — pas de compte enfant.
 - Écran d'accueil avec cartes enfants (avatar, étoiles, progression vers la
   prochaine récompense), sans classement ni comparaison entre enfants.
 - Ajout/modification/suppression d'enfant, ~20 avatars, couleur préférée.

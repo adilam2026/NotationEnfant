@@ -1,55 +1,52 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mes_etoiles/services/error_mapping.dart';
-import 'package:mes_etoiles/utils/auth_redirect.dart';
 
 void main() {
   group('mapSupabaseError — AuthException with a typed code', () {
-    test('email_not_confirmed maps to a friendly message with the matching code', () {
+    test('otp_expired maps to a single honest "incorrect ou expiré" message', () {
+      // The Supabase server itself doesn't distinguish a wrong code from an
+      // expired one — both come back as this exact code. Splitting it into
+      // two different messages client-side would be guessing, not fact.
       final result = mapSupabaseError(
-        const AuthException('Email not confirmed', code: 'email_not_confirmed'),
+        const AuthException('Token has expired or is invalid', code: 'otp_expired'),
       );
-      expect(result.code, 'email_not_confirmed');
-      expect(result.message, contains('Confirmez votre email'));
-      expect(isEmailNotConfirmedError(result), isTrue);
+      expect(result.message, contains('incorrect'));
+      expect(result.message, contains('expiré'));
     });
 
-    test('invalid_credentials maps to a wrong-password message, not confirmation', () {
+    test('over_email_send_rate_limit maps to a rate-limit message', () {
       final result = mapSupabaseError(
-        const AuthException('Invalid login credentials', code: 'invalid_credentials'),
+        const AuthException('Rate limit exceeded', code: 'over_email_send_rate_limit'),
       );
-      expect(result.message, 'Email ou mot de passe incorrect.');
-      expect(isEmailNotConfirmedError(result), isFalse);
+      expect(result.message, 'Trop de tentatives. Attendez quelques instants avant de réessayer.');
     });
 
-    test('user_already_exists maps to an already-registered message', () {
+    test('validation_failed (malformed email) maps to a clear message', () {
       final result = mapSupabaseError(
-        const AuthException('User already registered', code: 'user_already_exists'),
+        const AuthException('Unable to validate email address', code: 'validation_failed'),
       );
-      expect(result.message, contains('existe déjà'));
-    });
-
-    test('weak_password maps to a length-requirement message', () {
-      final result = mapSupabaseError(
-        const AuthException('Password too short', code: 'weak_password'),
-      );
-      expect(result.message, contains('6 caractères'));
+      expect(result.message, contains('email invalide'));
     });
   });
 
-  group('mapSupabaseError — AuthException without a code (older/self-hosted)', () {
-    test('falls back to matching "email not confirmed" in the raw message', () {
+  group('mapSupabaseError — AuthException without a typed code', () {
+    test('falls back to matching "token has expired" in the raw message', () {
       final result = mapSupabaseError(
-        const AuthException('Email not confirmed'),
+        const AuthException('Token has expired or is invalid'),
       );
-      expect(isEmailNotConfirmedError(result), isTrue);
+      expect(result.message, contains('incorrect'));
     });
 
-    test('never leaks the raw technical message to the user', () {
+    test('never leaks a raw technical message to the user', () {
       final result = mapSupabaseError(
         const AuthException('some unexpected gotrue internal detail'),
       );
       expect(result.message, isNot(contains('gotrue')));
+      expect(result.message, 'Une erreur est survenue. Réessayez.');
     });
   });
 
@@ -69,18 +66,35 @@ void main() {
     });
   });
 
-  test('a non-Supabase error still produces a safe generic message', () {
+  group('mapSupabaseError — connectivity', () {
+    test('a SocketException maps to a French "no internet" message', () {
+      final result = mapSupabaseError(const SocketException('Failed host lookup'));
+      expect(result.message, 'Connexion impossible. Vérifiez votre connexion internet.');
+    });
+
+    test('a TimeoutException maps to the same "no internet" message', () {
+      final result = mapSupabaseError(TimeoutException('timed out'));
+      expect(result.message, 'Connexion impossible. Vérifiez votre connexion internet.');
+    });
+  });
+
+  test('an unrecognized error still produces a safe generic message', () {
     final result = mapSupabaseError(Exception('boom'));
     expect(result.message, isNotEmpty);
+    expect(result.message, isNot(contains('boom')));
   });
 
-  test('isEmailNotConfirmedError is false for an unrelated AppException', () {
-    expect(isEmailNotConfirmedError(AppException('Une erreur est survenue.')), isFalse);
-  });
-
-  test('the confirmation/reset deep link never points at localhost', () {
-    expect(kAuthRedirectUrl.contains('localhost'), isFalse);
-    expect(kAuthRedirectUrl.contains('127.0.0.1'), isFalse);
-    expect(kAuthRedirectUrl, startsWith('io.mesetoiles.app://'));
+  test('no AppException message ever contains raw exception type names', () {
+    const rawTypeNames = ['AuthException', 'PostgrestException', 'StackTrace'];
+    final samples = [
+      mapSupabaseError(const AuthException('x', code: 'otp_expired')),
+      mapSupabaseError(PostgrestException(message: 'insufficient_stars')),
+      mapSupabaseError(Exception('boom')),
+    ];
+    for (final sample in samples) {
+      for (final typeName in rawTypeNames) {
+        expect(sample.message, isNot(contains(typeName)));
+      }
+    }
   });
 }

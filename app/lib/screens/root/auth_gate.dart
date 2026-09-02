@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../providers/family_provider.dart';
-import '../auth/welcome_screen.dart';
+import '../auth/email_otp_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 import 'root_shell.dart';
 import 'splash_screen.dart';
@@ -45,7 +45,7 @@ class _AuthGateState extends State<AuthGate> {
           onDone: () => setState(() => _onboardingSeen = true),
         );
       }
-      return const WelcomeScreen();
+      return const EmailOtpScreen();
     }
 
     // Signed in.

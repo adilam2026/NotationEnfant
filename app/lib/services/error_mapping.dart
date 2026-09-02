@@ -1,12 +1,10 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// User-facing exception. Never expose a raw Supabase/Postgrest error
 /// message to a parent — always go through [mapSupabaseError] first.
-///
-/// [code] carries a normalized, stable identifier (e.g.
-/// `'email_not_confirmed'`) so UI code can branch on *what* went wrong
-/// without re-parsing the (translated, user-facing) [message] — see
-/// [isEmailNotConfirmedError].
 class AppException implements Exception {
   final String message;
   final String? code;
@@ -15,50 +13,41 @@ class AppException implements Exception {
   String toString() => message;
 }
 
-const _emailNotConfirmedCode = 'email_not_confirmed';
-
-/// Translates a raw Supabase/Postgrest error into a short, friendly French
-/// message. Pure function (no Supabase client access) so it can be unit
-/// tested directly — see test/unit/error_mapping_test.dart.
+/// Translates a raw Supabase/Postgrest/network error into a short, friendly
+/// French message. Pure function (no Supabase client access) so it can be
+/// unit tested directly — see test/unit/error_mapping_test.dart.
 AppException mapSupabaseError(Object error) {
   if (error is AuthException) {
     switch (error.code) {
-      case 'invalid_credentials':
-        return AppException('Email ou mot de passe incorrect.');
-      case 'user_already_exists':
-      case 'email_exists':
-        return AppException('Un compte existe déjà avec cet email.');
-      case 'email_not_confirmed':
+      case 'otp_expired':
+        // Supabase's GoTrue server does not distinguish "wrong code" from
+        // "expired code" — both come back as this same error code with the
+        // message "Token has expired or is invalid." (verified in the
+        // gotrue package source: there is no separate "invalid" code). A
+        // single message that covers both is more honest than guessing.
         return AppException(
-          'Confirmez votre email avant de vous connecter (vérifiez votre boîte de réception).',
-          code: _emailNotConfirmedCode,
+          'Code incorrect ou expiré. Vérifiez le code reçu, ou demandez-en un nouveau.',
         );
-      case 'weak_password':
-        return AppException('Le mot de passe doit contenir au moins 6 caractères.');
       case 'over_email_send_rate_limit':
       case 'over_request_rate_limit':
-        return AppException('Trop de tentatives, réessayez dans quelques minutes.');
+      case 'over_sms_send_rate_limit':
+        return AppException('Trop de tentatives. Attendez quelques instants avant de réessayer.');
+      case 'validation_failed':
+        return AppException('Adresse email invalide.');
     }
 
     // Older/self-hosted Supabase instances don't always send a typed
     // `code` — fall back to matching the message in that case.
     final msg = error.message.toLowerCase();
-    if (msg.contains('invalid login credentials')) {
-      return AppException('Email ou mot de passe incorrect.');
-    }
-    if (msg.contains('already registered') || msg.contains('already exists')) {
-      return AppException('Un compte existe déjà avec cet email.');
-    }
-    if (msg.contains('email not confirmed') || msg.contains('email_not_confirmed')) {
+    if (msg.contains('token has expired') || msg.contains('otp_expired')) {
       return AppException(
-        'Confirmez votre email avant de vous connecter (vérifiez votre boîte de réception).',
-        code: _emailNotConfirmedCode,
+        'Code incorrect ou expiré. Vérifiez le code reçu, ou demandez-en un nouveau.',
       );
     }
-    if (msg.contains('password') && msg.contains('least')) {
-      return AppException('Le mot de passe doit contenir au moins 6 caractères.');
+    if (msg.contains('rate limit')) {
+      return AppException('Trop de tentatives. Attendez quelques instants avant de réessayer.');
     }
-    return AppException('Impossible de vous connecter pour le moment.');
+    return AppException('Une erreur est survenue. Réessayez.');
   }
 
   if (error is PostgrestException) {
@@ -73,13 +62,9 @@ AppException mapSupabaseError(Object error) {
     return AppException('Impossible de synchroniser pour le moment.');
   }
 
-  return AppException('Une erreur est survenue. Réessayez.');
-}
+  if (error is SocketException || error is HttpException || error is TimeoutException) {
+    return AppException('Connexion impossible. Vérifiez votre connexion internet.');
+  }
 
-/// True when [error] is specifically "this account exists but its email
-/// hasn't been confirmed yet" — callers use this to offer a resend action
-/// instead of a dead-end error. Takes the exception already mapped by
-/// [mapSupabaseError] (that's what callers actually catch).
-bool isEmailNotConfirmedError(Object error) {
-  return error is AppException && error.code == _emailNotConfirmedCode;
+  return AppException('Une erreur est survenue. Réessayez.');
 }
