@@ -25,30 +25,23 @@ et les limites de fréquence sont configurés côté Dashboard uniquement.
 
 ### 2.1 Le template d'email doit afficher le code, pas un bouton
 
-Allez dans **Authentication → Email Templates**.
+Allez dans **Authentication → Emails → Magic link or OTP** (template
+unique confirmé sur ce projet — pas de template "Email OTP" séparé).
 
-Le template utilisé par `signInWithOtp()` est habituellement celui nommé
-**« Magic Link »** (certains projets Supabase plus récents affichent aussi
-une entrée séparée **« Email OTP »** — si elle existe sur votre projet,
-c'est celle-là qu'il faut modifier ; testez pour voir laquelle des deux
-part réellement quand vous appelez `sendOtp`, je n'ai pas pu vérifier
-l'intitulé exact affiché sur votre projet depuis mon environnement, qui
-n'a pas accès à votre Dashboard).
-
-Remplacez le contenu du template (par défaut un bouton `{{ .ConfirmationURL }}`)
-par quelque chose comme :
-
-```
-Objet : Votre code Mes Étoiles ⭐
-
-Corps :
-
-Votre code de vérification
-
-{{ .Token }}
-
-Saisissez ce code dans l'application Mes Étoiles.
-```
+1. Dans la section **Body**, cliquez **Source** (à côté de "Preview")
+   pour éditer le HTML brut.
+2. **Subject** :
+   ```
+   Votre code Mes Étoiles ⭐
+   ```
+3. **Body** (en mode Source) — remplacez le contenu par défaut (un bouton
+   "Sign in" pointant vers `{{ .ConfirmationURL }}`) par :
+   ```html
+   <h2>Votre code de vérification</h2>
+   <p style="font-size: 32px; font-weight: bold; letter-spacing: 4px;">{{ .Token }}</p>
+   <p>Saisissez ce code dans l'application Mes Étoiles.</p>
+   ```
+4. **Save changes**.
 
 Points importants :
 - Utilisez **`{{ .Token }}`** (le code à 6 chiffres), pas `{{ .ConfirmationURL }}`.
@@ -57,6 +50,12 @@ Points importants :
   email.
 - Le contenu ci-dessus est un exemple minimal ; adaptez le style/HTML à
   votre goût, seul `{{ .Token }}` est indispensable.
+- **Si "Save changes" reste grisé ou que la modification ne persiste
+  pas** : Supabase bloque la personnalisation du Subject/Body tant qu'un
+  SMTP personnalisé n'est pas configuré (le mailer partagé par défaut ne
+  l'autorise pas). Il faut alors renseigner un SMTP dans
+  **Authentication → Emails → SMTP Settings** (ex. Resend, SendGrid,
+  Gmail) avant de pouvoir sauvegarder ce template.
 
 ### 2.2 Site URL / Additional Redirect URLs
 
