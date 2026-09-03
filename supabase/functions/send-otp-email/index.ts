@@ -13,22 +13,19 @@
 // `supabase secrets set NAME=value`):
 //   RESEND_API_KEY          from resend.com → API Keys
 //   SEND_EMAIL_HOOK_SECRET  the "Secret" value shown on the Supabase
-//                           "Add Send Email hook" screen (format
-//                           "v1,whsec_...") — paste it exactly as shown,
-//                           do not strip the "v1," part.
+//                           "Add Send Email hook" screen, pasted exactly
+//                           as shown (format "v1,whsec_..." — the code
+//                           below strips the "v1," prefix itself, see
+//                           below).
 //
 // Signature verification: Supabase Auth Hooks are signed per the Standard
 // Webhooks spec (https://www.standardwebhooks.com/) — confirmed by the
 // "whsec_" secret format Supabase's own hook screen shows. We verify with
-// the official `standardwebhooks` package rather than hand-rolling HMAC
-// comparison, passing the secret through exactly as Supabase generated it.
-//
-// ⚠️ Not verified end-to-end (no live access to a real Supabase project
-// from the environment this was written in): if the Function logs show
-// signature verification failing on every single request, the first thing
-// to try is passing HOOK_SECRET.replace(/^v1,/, '') to `new Webhook(...)`
-// instead of the raw value below — see the log line this prints on
-// failure.
+// the official `standardwebhooks` package. Supabase's displayed secret is
+// prefixed "v1," (their own versioning marker, not part of the key
+// material) — this was confirmed against a real deployment: passing the
+// secret unstripped made every request fail verification with a 401, so
+// the code below strips it before constructing the Webhook instance.
 
 import { Webhook } from "npm:standardwebhooks@1.0.0";
 
@@ -58,7 +55,12 @@ Deno.serve(async (req: Request) => {
 
   let data: HookPayload;
   try {
-    const wh = new Webhook(HOOK_SECRET);
+    // Supabase displays the secret as "v1,whsec_..." but the Standard
+    // Webhooks reference library expects only the "whsec_..." part — the
+    // "v1," is Supabase's own versioning prefix, not part of the key
+    // material. Confirmed necessary: passing the raw "v1,whsec_..." value
+    // made every real request fail verification with a 401.
+    const wh = new Webhook(HOOK_SECRET.replace(/^v1,/, ""));
     data = wh.verify(payload, headers) as HookPayload;
   } catch (err) {
     console.error("Webhook signature verification failed:", err);
