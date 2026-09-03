@@ -17,6 +17,15 @@ class AppException implements Exception {
 /// French message. Pure function (no Supabase client access) so it can be
 /// unit tested directly — see test/unit/error_mapping_test.dart.
 AppException mapSupabaseError(Object error) {
+  if (error is AuthRetryableFetchException) {
+    // Thrown by gotrue for any network/CORS-level failure reaching Supabase
+    // at all (verified in gotrue's fetch.dart: any exception from the
+    // underlying http client, whatever its concrete type, is caught and
+    // rethrown as this one) — distinct from a request that reached the
+    // server and got an error response back.
+    return AppException('Connexion impossible. Vérifiez votre connexion internet.');
+  }
+
   if (error is AuthException) {
     switch (error.code) {
       case 'otp_expired':

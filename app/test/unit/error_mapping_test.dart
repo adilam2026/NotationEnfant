@@ -6,6 +6,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mes_etoiles/services/error_mapping.dart';
 
 void main() {
+  group('mapSupabaseError — AuthRetryableFetchException (network failure)', () {
+    test('maps to the French "no internet" message, not the generic fallback', () {
+      // Confirmed by reading gotrue's fetch.dart: ANY failure reaching the
+      // underlying http client (DNS, connection refused, TLS, timeout —
+      // whatever the concrete Dart exception type) is caught and rethrown
+      // as this specific AuthException subclass, before any HTTP response
+      // exists. It must not fall through to the generic "Une erreur est
+      // survenue" — that was a real bug caught via a live device test.
+      final result = mapSupabaseError(
+        AuthRetryableFetchException(message: 'ClientException: Failed host lookup'),
+      );
+      expect(result.message, 'Connexion impossible. Vérifiez votre connexion internet.');
+    });
+  });
+
   group('mapSupabaseError — AuthException with a typed code', () {
     test('otp_expired maps to a single honest "incorrect ou expiré" message', () {
       // The Supabase server itself doesn't distinguish a wrong code from an
